@@ -1,8 +1,8 @@
-node_modules/
-dist/
+﻿__pycache__/
+*.pyc
+.venv/
+venv/
 .env
-*.log
+node_modules/
+data/
 .DS_Store
-*.db
-*.accdb
-*.mdb
