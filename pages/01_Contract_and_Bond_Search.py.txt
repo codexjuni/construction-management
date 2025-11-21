@@ -1,0 +1,91 @@
+import os
+
+import streamlit as st
+from supabase import create_client, Client
+
+
+@st.cache_resource
+def get_supabase() -> Client:
+    """Return a cached Supabase client.
+
+    Reality: This works if SUPABASE_URL and SUPABASE_*_KEY are set in your env
+    (same values you used in test_supabase.py).
+    """
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
+    if not url or not key:
+        raise RuntimeError("Missing SUPABASE_URL or SUPABASE_*_KEY environment variables.")
+    return create_client(url, key)
+
+
+def query_records(table: str, column: str, term: str):
+    """Search a single column with ILIKE and return up to 100 rows.
+
+    Reality: Table/column names *must* match your Supabase schema.
+    """
+    if not term:
+        return []
+
+    supabase = get_supabase()
+    response = (
+        supabase
+        .table(table)
+        .select("*")
+        .ilike(column, f"%{term}%")
+        .limit(100)
+        .execute()
+    )
+    return response.data or []
+
+
+def main():
+    st.title("Contract / Bond Search")
+
+    st.caption(
+        "Search your Supabase data by contract or bond number. "
+        "You can expand this later to more fields/tables."
+    )
+
+    search_term = st.text_input(
+        "Search text",
+        placeholder="e.g. 15.14, WCN2531390, Old Republic",
+    )
+
+    # Reality: These names assume you have `contracts` and `bonds` tables
+    # with the listed columns. If your actual names differ, change them here.
+    search_type = st.selectbox(
+        "Search in",
+        options=[
+            "contracts by contract_number",
+            "contracts by bond_number",
+            "bonds by bond_number",
+        ],
+    )
+
+    table_column_map = {
+        "contracts by contract_number": ("contracts", "contract_number"),
+        "contracts by bond_number": ("contracts", "bond_number"),
+        "bonds by bond_number": ("bonds", "bond_number"),
+    }
+
+    table, column = table_column_map[search_type]
+
+    if st.button("Search") and search_term:
+        with st.spinner("Searching..."):
+            try:
+                rows = query_records(table, column, search_term)
+            except Exception as exc:
+                st.error(f"Search failed: {exc}")
+                return
+
+        st.write(f"Found {len(rows)} record(s).")
+
+        if rows:
+            st.dataframe(rows, use_container_width=True)
+
+    elif search_term:
+        st.info("Press Search to run the query.")
+
+
+if __name__ == "__main__":
+    main()
