@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HJC ISM — Subcontractor P&L</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --border: #dfe3e8; --text: #1f2933;
+    --text-dim: #616e7c; --accent: #1f6feb; --accent-dark: #1451b3;
+    --danger: #c0392b; --ok: #1e8e3e; --warn: #b25e00;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); color:var(--text); }
+  header { background:#111827; color:#fff; padding:14px 20px; display:flex; justify-content:space-between; align-items:center; }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  header .who { font-size:13px; color:#9ca3af; }
+  nav { display:flex; gap:4px; background:#1f2933; padding:0 20px; }
+  nav button { background:none; border:none; color:#cbd2d9; padding:12px 16px; font-size:13px; cursor:pointer; border-bottom:2px solid transparent; }
+  nav button.active { color:#fff; border-bottom-color:var(--accent); }
+  nav button:hover { color:#fff; }
+  main { padding:24px; max-width:1200px; margin:0 auto; }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:20px; margin-bottom:20px; }
+  .panel h2 { margin-top:0; font-size:15px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-dim); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); }
+  th { color:var(--text-dim); font-weight:600; font-size:12px; text-transform:uppercase; }
+  tr:hover td { background:#f9fafb; cursor:pointer; }
+  .row-actions td { cursor:default; }
+  .btn { background:var(--accent); color:#fff; border:none; border-radius:6px; padding:8px 14px; font-size:13px; cursor:pointer; }
+  .btn:hover { background:var(--accent-dark); }
+  .btn.secondary { background:#fff; color:var(--text); border:1px solid var(--border); }
+  .btn.danger { background:var(--danger); }
+  .btn.small { padding:4px 10px; font-size:12px; }
+  .toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+  .field { margin-bottom:12px; }
+  .field label { display:block; font-size:12px; color:var(--text-dim); margin-bottom:4px; }
+  .field input, .field select, .field textarea { width:100%; padding:8px; border:1px solid var(--border); border-radius:6px; font-size:13px; font-family:inherit; }
+  .field-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .field-row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+  .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:flex-start; justify-content:center; padding:40px 20px; overflow-y:auto; z-index:50; }
+  .modal { background:#fff; border-radius:10px; padding:24px; width:100%; max-width:640px; }
+  .modal h3 { margin-top:0; }
+  .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+  .login-wrap { display:flex; align-items:center; justify-content:center; min-height:80vh; }
+  .login-box { background:#fff; border:1px solid var(--border); border-radius:10px; padding:32px; width:340px; }
+  .login-box h1 { font-size:18px; margin-bottom:4px; }
+  .login-box p { color:var(--text-dim); font-size:13px; margin-top:0; }
+  .error { color:var(--danger); font-size:13px; margin-top:8px; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+  .badge.active { background:#e3f5e8; color:var(--ok); }
+  .badge.closed { background:#f2f2f2; color:var(--text-dim); }
+  .money { font-variant-numeric: tabular-nums; }
+  .balance-pos { color:var(--warn); font-weight:600; }
+  .balance-zero { color:var(--ok); font-weight:600; }
+  .section-title { font-size:13px; font-weight:600; margin:18px 0 8px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.03em; }
+  select[multiple] { height:auto; }
+  .empty { color:var(--text-dim); font-size:13px; padding:16px 0; }
+  .waiver-flags { display:flex; gap:10px; font-size:12px; }
+  .waiver-flags label { display:flex; align-items:center; gap:4px; font-weight:normal; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+// ============================================================
+// HJC ISM — Subcontractor P&L Dashboard
+// Vanilla JS, no framework, no build step. Talks to Supabase
+// directly via raw REST (PostgREST + GoTrue auth) — same pattern
+// as the HJC PA dashboard. No localStorage: session lives in
+// memory only, so a page refresh requires logging in again
+// (acceptable v1 tradeoff — can add persistence later once this
+// is deployed and not being previewed inline).
+// ============================================================
+
+const SUPABASE_URL = "https://slikqhezkwjmjrmektgf.supabase.co";
+const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNsaWtxaGV6a3dqbWpybWVrdGdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMxNzg5OTEsImV4cCI6MjA3ODUzODk5MX0.G0Z619NstWAPpb3k2tUHhYUg7yXZX72Za8iK_SZcJVI";
+
+let session = null; // { access_token, user, person }
+let state = {
+  view: 'subcontractors',
+  clients: [], subcontractors: [], projects: [], people: [], subcontracts: [],
+  changeOrders: [], invoices: [], payments: [], prelim: [], summaries: [],
+  selectedProjectId: null,
+  loading: false, error: null,
+};
+let modal = null; // { type, data }
+
+// ---------- API helpers ----------
+async function api(path, opts = {}) {
+  const headers = {
+    'apikey': ANON_KEY,
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${session ? session.access_token : ANON_KEY}`,
+    ...(opts.headers || {}),
+  };
+  const res = await fetch(`${SUPABASE_URL}${path}`, { ...opts, headers });
+  if (!res.ok) {
+    let msg = `${res.status}`;
+    try { const j = await res.json(); msg += `: ${j.message || JSON.stringify(j)}`; } catch (e) {}
+    throw new Error(msg);
+  }
+  if (res.status === 204) return null;
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+function q(table, query = '') { return api(`/rest/v1/${table}?select=*${query}`); }
+function insertRow(table, row) {
+  return api(`/rest/v1/${table}`, { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify(row) });
+}
+function updateRow(table, id, patch) {
+  return api(`/rest/v1/${table}?id=eq.${id}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(patch) });
+}
+function deleteRow(table, id) {
+  return api(`/rest/v1/${table}?id=eq.${id}`, { method: 'DELETE' });
+}
+
+async function login(email, password) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: ANON_KEY },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j.error_description || j.msg || 'Login failed — check email/password.');
+  }
+  const data = await res.json();
+  session = { access_token: data.access_token, user: data.user };
+  const people = await api(`/rest/v1/people?select=*&auth_user_id=eq.${data.user.id}`);
+  session.person = people && people[0] ? people[0] : { name: data.user.email, email: data.user.email };
+}
+function logout() { session = null; state.view = 'subcontractors'; render(); }
+
+// ---------- Data loading ----------
+async function loadAll() {
+  state.loading = true; render();
+  try {
+    const [clients, subcontractors, projects, people, subcontracts, changeOrders, invoices, payments, prelim, summaries] = await Promise.all([
+      q('clients', '&order=name'),
+      q('subcontractors', '&order=name'),
+      q('projects', '&order=project_number'),
+      q('people', '&order=name'),
+      q('subcontracts'),
+      q('subcontract_change_orders'),
+      q('subcontract_invoices'),
+      q('subcontract_payments'),
+      q('prelim_notices'),
+      q('subcontract_summary'),
+    ]);
+    Object.assign(state, { clients, subcontractors, projects, people, subcontracts, changeOrders, invoices, payments, prelim, summaries });
+    state.error = null;
+  } catch (e) {
+    state.error = e.message;
+  }
+  state.loading = false; render();
+}
+
+// ---------- Utilities ----------
+function money(n) { n = Number(n || 0); return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' }); }
+function fmtDate(d) { return d ? d.substring(0, 10) : ''; }
+function byId(arr, id) { return (arr || []).find(x => x.id === id); }
+function esc(s) { return (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// ---------- Render ----------
+function render() {
+  const app = document.getElementById('app');
+  if (!session) { app.innerHTML = renderLogin(); attachLoginHandlers(); return; }
+
+  app.innerHTML = `
+    <header>
+      <h1>HJC ISM — Subcontractor P&amp;L</h1>
+      <div class="who">${esc(session.person.name)} &nbsp;·&nbsp; <a href="#" id="logoutBtn" style="color:#9ca3af;">Log out</a></div>
+    </header>
+    <nav>
+      ${navBtn('subcontractors', 'Subcontractors')}
+      ${navBtn('projects', 'Projects')}
+      ${navBtn('subcontracts', 'Subcontracts (P&L)')}
+    </nav>
+    <main>
+      ${state.error ? `<div class="panel"><p class="error">${esc(state.error)}</p></div>` : ''}
+      ${state.loading ? `<div class="panel"><p class="empty">Loading…</p></div>` : renderView()}
+    </main>
+    ${modal ? renderModal() : ''}
+  `;
+  document.getElementById('logoutBtn').onclick = (e) => { e.preventDefault(); logout(); };
+  document.querySelectorAll('nav button').forEach(b => b.onclick = () => { state.view = b.dataset.view; render(); });
+  attachViewHandlers();
+  if (modal) attachModalHandlers();
+}
+function navBtn(view, label) {
+  return `<button data-view="${view}" class="${state.view === view ? 'active' : ''}">${label}</button>`;
+}
+function renderView() {
+  if (state.view === 'subcontractors') return renderSubcontractors();
+  if (state.view === 'projects') return renderProjects();
+  if (state.view === 'subcontracts') return renderSubcontracts();
+  return '';
+}
+
+// ---------- Login screen ----------
+function renderLogin() {
+  return `
+    <div class="login-wrap">
+      <div class="login-box">
+        <h1>HJC ISM</h1>
+        <p>Subcontractor P&amp;L system</p>
+        <div class="field"><label>Email</label><input type="email" id="loginEmail" autocomplete="username"></div>
+        <div class="field"><label>Password</label><input type="password" id="loginPassword" autocomplete="current-password"></div>
+        <button class="btn" id="loginBtn" style="width:100%;">Log in</button>
+        <div id="loginError" class="error"></div>
+      </div>
+    </div>
+  `;
+}
+function attachLoginHandlers() {
+  const go = async () => {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const errEl = document.getElementById('loginError');
+    errEl.textContent = '';
+    try {
+      await login(email, password);
+      await loadAll();
+    } catch (e) {
+      errEl.textContent = e.message;
+    }
+  };
+  document.getElementById('loginBtn').onclick = go;
+  document.getElementById('loginPassword').addEventListener('keydown', ev => { if (ev.key === 'Enter') go(); });
+}
+
+// ---------- Subcontractors ----------
+function renderSubcontractors() {
+  const rows = state.subcontractors.map(s => `
+    <tr data-id="${s.id}" class="sc-row">
+      <td>${esc(s.name)}</td>
+      <td>${esc(s.trade || '')}</td>
+      <td>${esc(s.contact_name || '')}</td>
+      <td>${esc(s.email || '')}</td>
+      <td>${esc(s.cslb_number || '')}</td>
+      <td>${s.cslb_expiration ? fmtDate(s.cslb_expiration) : ''}</td>
+      <td>${s.is_active ? '<span class="badge active">Active</span>' : '<span class="badge closed">Inactive</span>'}</td>
+    </tr>`).join('');
+  return `
+    <div class="panel">
+      <div class="toolbar">
+        <h2 style="margin:0;">Subcontractors (${state.subcontractors.length})</h2>
+        <button class="btn" id="addSubcontractor">+ Add Subcontractor</button>
+      </div>
+      <table>
+        <thead><tr><th>Name</th><th>Trade</th><th>Contact</th><th>Email</th><th>CSLB #</th><th>CSLB Exp</th><th>Status</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="7" class="empty">No subcontractors yet.</td></tr>'}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+// ---------- Projects ----------
+function renderProjects() {
+  const rows = state.projects.map(p => {
+    const client = byId(state.clients, p.client_id);
+    const pm = byId(state.people, p.project_manager_id);
+    return `
+    <tr data-id="${p.id}" class="proj-row">
+      <td>${esc(p.project_number)}</td>
+      <td>${esc(p.project_name || '')}</td>
+      <td>${esc(client ? client.name : '')}</td>
+      <td>${esc(p.joc_number || '')}</td>
+      <td>${esc(pm ? pm.name : '')}</td>
+    </tr>`;
+  }).join('');
+  return `
+    <div class="panel">
+      <div class="toolbar">
+        <h2 style="margin:0;">Projects (${state.projects.length})</h2>
+        <button class="btn" id="addProject">+ Add Project</button>
+      </div>
+      <table>
+        <thead><tr><th>Project #</th><th>Name</th><th>Client/Agency</th><th>JOC #</th><th>PM</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="empty">No projects yet.</td></tr>'}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+// ---------- Subcontracts (the P&L view) ----------
+function renderSubcontracts() {
+  const projectOptions = state.projects.map(p => `<option value="${p.id}" ${state.selectedProjectId === p.id ? 'selected' : ''}>${esc(p.project_number)} — ${esc(p.project_name || '')}</option>`).join('');
+  const selected = state.selectedProjectId;
+  const scs = selected ? state.subcontracts.filter(sc => sc.project_id === selected) : [];
+  const scHtml = scs.map(sc => renderSubcontractCard(sc)).join('') || (selected ? '<p class="empty">No subcontracts on this project yet.</p>' : '');
+  return `
+    <div class="panel">
+      <div class="toolbar">
+        <h2 style="margin:0;">Subcontracts</h2>
+      </div>
+      <div class="field">
+        <label>Select a project</label>
+        <select id="projectPicker"><option value="">— choose a project —</option>${projectOptions}</select>
+      </div>
+      ${selected ? `<button class="btn" id="addSubcontract" style="margin-bottom:14px;">+ Add Subcontract to this Project</button>` : ''}
+      ${scHtml}
+    </div>
+  `;
+}
+function renderSubcontractCard(sc) {
+  const sub = byId(state.subcontractors, sc.subcontractor_id);
+  const summary = state.summaries.find(x => x.subcontract_id === sc.id) || {};
+  const cos = state.changeOrders.filter(c => c.subcontract_id === sc.id);
+  const invs = state.invoices.filter(i => i.subcontract_id === sc.id);
+  const pays = state.payments.filter(p => invs.some(i => i.id === p.subcontract_invoice_id));
+  const prelims = state.prelim.filter(x => x.subcontract_id === sc.id);
+  const balance = Number(summary.balance || 0);
+
+  const coRows = cos.map(c => `<tr><td>${c.co_number ?? ''}</td><td>${fmtDate(c.co_date)}</td><td class="money">${money(c.amount)}</td><td>${esc(c.description || '')}</td></tr>`).join('');
+  const invRows = invs.map(i => {
+    const paid = pays.filter(p => p.subcontract_invoice_id === i.id).reduce((s, p) => s + Number(p.amount), 0);
+    return `<tr>
+      <td>${esc(i.invoice_number || '')}</td><td>${fmtDate(i.invoice_date)}</td>
+      <td class="money">${money(i.amount)}</td><td class="money">${money(paid)}</td>
+      <td>
+        <span class="waiver-flags">
+          <label>CP ${i.conditional_progress_waiver ? '✓' : '—'}</label>
+          <label>UP ${i.unconditional_progress_waiver ? '✓' : '—'}</label>
+          <label>CF ${i.conditional_final_waiver ? '✓' : '—'}</label>
+          <label>UF ${i.unconditional_final_waiver ? '✓' : '—'}</label>
+        </span>
+      </td>
+      <td><button class="btn small secondary add-payment" data-invoice-id="${i.id}">+ Payment</button></td>
+    </tr>`;
+  }).join('');
+  const prelimRows = prelims.map(p => `<tr><td>${esc(p.vendor_name)}</td><td class="money">${money(p.estimate_amount)}</td><td>${p.conditional_final_received ? '✓' : '—'}</td><td>${p.unconditional_final_received ? '✓' : '—'}</td></tr>`).join('');
+
+  return `
+    <div class="panel" style="margin-top:16px; border-left:4px solid var(--accent);" data-subcontract-id="${sc.id}">
+      <div class="toolbar">
+        <div>
+          <strong>${esc(sub ? sub.name : 'Unknown subcontractor')}</strong>
+          &nbsp; <span class="badge ${sc.status === 'active' ? 'active' : 'closed'}">${esc(sc.status)}</span>
+        </div>
+        <div>
+          Contract: <span class="money">${money(sc.subcontract_amount)}</span> &nbsp;|&nbsp;
+          Revised: <span class="money">${money(summary.revised_contract_amount)}</span> &nbsp;|&nbsp;
+          Invoiced: <span class="money">${money(summary.total_invoiced)}</span> &nbsp;|&nbsp;
+          Paid: <span class="money">${money(summary.total_paid)}</span> &nbsp;|&nbsp;
+          Balance: <span class="money ${balance > 0 ? 'balance-pos' : 'balance-zero'}">${money(balance)}</span>
+        </div>
+      </div>
+
+      <div class="section-title">Change Orders <button class="btn small secondary add-co" data-sc="${sc.id}">+ Add</button></div>
+      <table><thead><tr><th>#</th><th>Date</th><th>Amount</th><th>Description</th></tr></thead>
+      <tbody>${coRows || '<tr><td colspan="4" class="empty">None</td></tr>'}</tbody></table>
+
+      <div class="section-title">Invoices <button class="btn small secondary add-invoice" data-sc="${sc.id}">+ Add</button></div>
+      <table><thead><tr><th>Invoice #</th><th>Date</th><th>Amount</th><th>Paid</th><th>Waivers</th><th></th></tr></thead>
+      <tbody>${invRows || '<tr><td colspan="6" class="empty">None</td></tr>'}</tbody></table>
+
+      <div class="section-title">Preliminary Notices <button class="btn small secondary add-prelim" data-sc="${sc.id}">+ Add</button></div>
+      <table><thead><tr><th>Sub/Vendor</th><th>Estimate</th><th>CF</th><th>UF</th></tr></thead>
+      <tbody>${prelimRows || '<tr><td colspan="4" class="empty">None</td></tr>'}</tbody></table>
+    </div>
+  `;
+}
+
+// ---------- View-level event handlers ----------
+function attachViewHandlers() {
+  if (state.view === 'subcontractors') {
+    const addBtn = document.getElementById('addSubcontractor');
+    if (addBtn) addBtn.onclick = () => openModal('subcontractor', {});
+    document.querySelectorAll('.sc-row').forEach(r => r.onclick = () => openModal('subcontractor', byId(state.subcontractors, r.dataset.id)));
+  }
+  if (state.view === 'projects') {
+    const addBtn = document.getElementById('addProject');
+    if (addBtn) addBtn.onclick = () => openModal('project', {});
+    document.querySelectorAll('.proj-row').forEach(r => r.onclick = () => openModal('project', byId(state.projects, r.dataset.id)));
+  }
+  if (state.view === 'subcontracts') {
+    const picker = document.getElementById('projectPicker');
+    if (picker) picker.onchange = () => { state.selectedProjectId = picker.value || null; render(); };
+    const addSc = document.getElementById('addSubcontract');
+    if (addSc) addSc.onclick = () => openModal('subcontract', { project_id: state.selectedProjectId });
+    document.querySelectorAll('.add-co').forEach(b => b.onclick = () => openModal('changeOrder', { subcontract_id: b.dataset.sc }));
+    document.querySelectorAll('.add-invoice').forEach(b => b.onclick = () => openModal('invoice', { subcontract_id: b.dataset.sc }));
+    document.querySelectorAll('.add-payment').forEach(b => b.onclick = () => openModal('payment', { subcontract_invoice_id: b.dataset.invoiceId }));
+    document.querySelectorAll('.add-prelim').forEach(b => b.onclick = () => openModal('prelim', { subcontract_id: b.dataset.sc }));
+  }
+}
+
+// ---------- Modals (add/edit forms) ----------
+function openModal(type, data) { modal = { type, data: data || {} }; render(); }
+function closeModal() { modal = null; render(); }
+
+function renderModal() {
+  const { type, data } = modal;
+  const forms = {
+    subcontractor: formSubcontractor,
+    project: formProject,
+    subcontract: formSubcontract,
+    changeOrder: formChangeOrder,
+    invoice: formInvoice,
+    payment: formPayment,
+    prelim: formPrelim,
+  };
+  return `<div class="modal-backdrop" id="modalBackdrop"><div class="modal">${forms[type](data)}</div></div>`;
+}
+
+function formSubcontractor(d) {
+  const isEdit = !!d.id;
+  return `
+    <h3>${isEdit ? 'Edit' : 'Add'} Subcontractor</h3>
+    <div class="field"><label>Company Name</label><input id="f_name" value="${esc(d.name)}"></div>
+    <div class="field-row">
+      <div class="field"><label>Contact Name</label><input id="f_contact_name" value="${esc(d.contact_name)}"></div>
+      <div class="field"><label>Contact Title</label><input id="f_contact_title" value="${esc(d.contact_title)}"></div>
+    </div>
+    <div class="field-row3">
+      <div class="field"><label>Office Phone</label><input id="f_office_phone" value="${esc(d.office_phone)}"></div>
+      <div class="field"><label>Mobile Phone</label><input id="f_mobile_phone" value="${esc(d.mobile_phone)}"></div>
+      <div class="field"><label>Fax</label><input id="f_fax" value="${esc(d.fax)}"></div>
+    </div>
+    <div class="field"><label>Email</label><input id="f_email" value="${esc(d.email)}"></div>
+    <div class="field-row">
+      <div class="field"><label>Address Line 1</label><input id="f_address_line1" value="${esc(d.address_line1)}"></div>
+      <div class="field"><label>Address Line 2</label><input id="f_address_line2" value="${esc(d.address_line2)}"></div>
+    </div>
+    <div class="field-row3">
+      <div class="field"><label>City</label><input id="f_city" value="${esc(d.city)}"></div>
+      <div class="field"><label>State</label><input id="f_state" value="${esc(d.state)}"></div>
+      <div class="field"><label>Zip</label><input id="f_zip" value="${esc(d.zip)}"></div>
+    </div>
+    <div class="field-row3">
+      <div class="field"><label>CSLB #</label><input id="f_cslb_number" value="${esc(d.cslb_number)}"></div>
+      <div class="field"><label>License Class</label><input id="f_license_class" value="${esc(d.license_class)}"></div>
+      <div class="field"><label>Trade</label><input id="f_trade" value="${esc(d.trade)}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>CSLB Expiration</label><input type="date" id="f_cslb_expiration" value="${fmtDate(d.cslb_expiration)}"></div>
+      <div class="field"><label>W-9 on File?</label><select id="f_w9_on_file"><option value="false" ${!d.w9_on_file?'selected':''}>No</option><option value="true" ${d.w9_on_file?'selected':''}>Yes</option></select></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>DIR Registration #</label><input id="f_dir_registration_number" value="${esc(d.dir_registration_number)}"></div>
+      <div class="field"><label>DIR Registration Expiration</label><input type="date" id="f_dir_registration_expiration" value="${fmtDate(d.dir_registration_expiration)}"></div>
+    </div>
+    <div class="field"><label>EIN</label><input id="f_ein" value="${esc(d.ein)}"></div>
+
+    <div class="section-title">General Liability</div>
+    <div class="field-row3">
+      <div class="field"><label>Policy #</label><input id="f_gl_policy_number" value="${esc(d.gl_policy_number)}"></div>
+      <div class="field"><label>Provider</label><input id="f_gl_provider" value="${esc(d.gl_provider)}"></div>
+      <div class="field"><label>Expiration</label><input type="date" id="f_gl_expiration" value="${fmtDate(d.gl_expiration)}"></div>
+    </div>
+    <div class="section-title">Workers Comp</div>
+    <div class="field-row3">
+      <div class="field"><label>Policy #</label><input id="f_wc_policy_number" value="${esc(d.wc_policy_number)}"></div>
+      <div class="field"><label>Provider</label><input id="f_wc_provider" value="${esc(d.wc_provider)}"></div>
+      <div class="field"><label>Expiration</label><input type="date" id="f_wc_expiration" value="${fmtDate(d.wc_expiration)}"></div>
+    </div>
+    <div class="section-title">Auto</div>
+    <div class="field-row3">
+      <div class="field"><label>Policy #</label><input id="f_auto_policy_number" value="${esc(d.auto_policy_number)}"></div>
+      <div class="field"><label>Provider</label><input id="f_auto_provider" value="${esc(d.auto_provider)}"></div>
+      <div class="field"><label>Expiration</label><input type="date" id="f_auto_expiration" value="${fmtDate(d.auto_expiration)}"></div>
+    </div>
+    <div class="field"><label>Active?</label><select id="f_is_active"><option value="true" ${d.is_active!==false?'selected':''}>Active</option><option value="false" ${d.is_active===false?'selected':''}>Inactive</option></select></div>
+    <div class="field"><label>Notes</label><textarea id="f_notes" rows="2">${esc(d.notes)}</textarea></div>
+    ${modalActions('subcontractor', d)}
+  `;
+}
+
+function formProject(d) {
+  const clientOpts = state.clients.map(c => `<option value="${c.id}" ${d.client_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('');
+  const pmOpts = state.people.map(p => `<option value="${p.id}" ${d.project_manager_id===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
+  return `
+    <h3>${d.id ? 'Edit' : 'Add'} Project</h3>
+    <div class="field"><label>Project Number</label><input id="f_project_number" value="${esc(d.project_number)}"></div>
+    <div class="field"><label>Project Name</label><input id="f_project_name" value="${esc(d.project_name)}"></div>
+    <div class="field-row">
+      <div class="field"><label>Client / Agency</label>
+        <select id="f_client_id"><option value="">— select —</option>${clientOpts}</select>
+      </div>
+      <div class="field"><label>Or new client name</label><input id="f_new_client_name" placeholder="type to create a new client"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>JOC #</label><input id="f_joc_number" value="${esc(d.joc_number)}"></div>
+      <div class="field"><label>Project Manager</label><select id="f_project_manager_id"><option value="">— none —</option>${pmOpts}</select></div>
+    </div>
+    <div class="field"><label>Project Address</label><input id="f_project_address" value="${esc(d.project_address)}"></div>
+    <div class="field-row3">
+      <div class="field"><label>City</label><input id="f_project_city" value="${esc(d.project_city)}"></div>
+      <div class="field"><label>State</label><input id="f_project_state" value="${esc(d.project_state)}"></div>
+      <div class="field"><label>Zip</label><input id="f_project_zip" value="${esc(d.project_zip)}"></div>
+    </div>
+    <div class="field"><label>HCAI/OSHPD #</label><input id="f_hcai_oshpd_number" value="${esc(d.hcai_oshpd_number)}"></div>
+    <div class="field-row">
+      <div class="field"><label>Start Date</label><input type="date" id="f_start_date" value="${fmtDate(d.start_date)}"></div>
+      <div class="field"><label>End Date</label><input type="date" id="f_end_date" value="${fmtDate(d.end_date)}"></div>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="f_notes" rows="2">${esc(d.notes)}</textarea></div>
+    ${modalActions('project', d)}
+  `;
+}
+
+function formSubcontract(d) {
+  const subOpts = state.subcontractors.map(s => `<option value="${s.id}" ${d.subcontractor_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('');
+  return `
+    <h3>${d.id ? 'Edit' : 'Add'} Subcontract</h3>
+    <div class="field"><label>Subcontractor</label><select id="f_subcontractor_id"><option value="">— select —</option>${subOpts}</select></div>
+    <div class="field"><label>Description</label><input id="f_description" value="${esc(d.description)}"></div>
+    <div class="field-row">
+      <div class="field"><label>Subcontract Amount</label><input type="number" step="0.01" id="f_subcontract_amount" value="${d.subcontract_amount ?? ''}"></div>
+      <div class="field"><label>Status</label><select id="f_status"><option value="active" ${d.status!=='closed'?'selected':''}>Active</option><option value="closed" ${d.status==='closed'?'selected':''}>Closed</option></select></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Start Date</label><input type="date" id="f_start_date" value="${fmtDate(d.start_date)}"></div>
+      <div class="field"><label>End Date</label><input type="date" id="f_end_date" value="${fmtDate(d.end_date)}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Contract Sent</label><input type="date" id="f_contract_sent_date" value="${fmtDate(d.contract_sent_date)}"></div>
+      <div class="field"><label>Contract Executed</label><input type="date" id="f_contract_executed_date" value="${fmtDate(d.contract_executed_date)}"></div>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="f_notes" rows="2">${esc(d.notes)}</textarea></div>
+    ${modalActions('subcontract', d)}
+  `;
+}
+
+function formChangeOrder(d) {
+  return `
+    <h3>${d.id ? 'Edit' : 'Add'} Change Order</h3>
+    <div class="field-row">
+      <div class="field"><label>CO #</label><input type="number" id="f_co_number" value="${d.co_number ?? ''}"></div>
+      <div class="field"><label>Date</label><input type="date" id="f_co_date" value="${fmtDate(d.co_date)}"></div>
+    </div>
+    <div class="field"><label>Amount</label><input type="number" step="0.01" id="f_amount" value="${d.amount ?? ''}"></div>
+    <div class="field"><label>Description</label><textarea id="f_description" rows="2">${esc(d.description)}</textarea></div>
+    ${modalActions('changeOrder', d)}
+  `;
+}
+
+function formInvoice(d) {
+  return `
+    <h3>${d.id ? 'Edit' : 'Add'} Invoice</h3>
+    <div class="field-row">
+      <div class="field"><label>Invoice #</label><input id="f_invoice_number" value="${esc(d.invoice_number)}"></div>
+      <div class="field"><label>Date</label><input type="date" id="f_invoice_date" value="${fmtDate(d.invoice_date)}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Amount</label><input type="number" step="0.01" id="f_amount" value="${d.amount ?? ''}"></div>
+      <div class="field"><label>Paid To</label><input id="f_paid_to" value="${esc(d.paid_to)}"></div>
+    </div>
+    <div class="field"><label>Invoice Type</label><input id="f_invoice_type" value="${esc(d.invoice_type)}"></div>
+    <div class="section-title">Lien Waivers</div>
+    <div class="field-row">
+      <div class="field"><label><input type="checkbox" id="f_conditional_progress_waiver" ${d.conditional_progress_waiver?'checked':''}> Conditional Progress (CP)</label></div>
+      <div class="field"><label><input type="checkbox" id="f_unconditional_progress_waiver" ${d.unconditional_progress_waiver?'checked':''}> Unconditional Progress (UP)</label></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label><input type="checkbox" id="f_conditional_final_waiver" ${d.conditional_final_waiver?'checked':''}> Conditional Final (CF)</label></div>
+      <div class="field"><label><input type="checkbox" id="f_unconditional_final_waiver" ${d.unconditional_final_waiver?'checked':''}> Unconditional Final (UF)</label></div>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="f_notes" rows="2">${esc(d.notes)}</textarea></div>
+    ${modalActions('invoice', d)}
+  `;
+}
+
+function formPayment(d) {
+  return `
+    <h3>${d.id ? 'Edit' : 'Add'} Payment</h3>
+    <div class="field-row">
+      <div class="field"><label>Payment Date</label><input type="date" id="f_payment_date" value="${fmtDate(d.payment_date)}"></div>
+      <div class="field"><label>Amount</label><input type="number" step="0.01" id="f_amount" value="${d.amount ?? ''}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Check #</label><input id="f_check_number" value="${esc(d.check_number)}"></div>
+      <div class="field"><label>Payment Type</label><input id="f_payment_type" value="${esc(d.payment_type)}"></div>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="f_notes" rows="2">${esc(d.notes)}</textarea></div>
+    ${modalActions('payment', d)}
+  `;
+}
+
+function formPrelim(d) {
+  return `
+    <h3>${d.id ? 'Edit' : 'Add'} Preliminary Notice</h3>
+    <div class="field"><label>Sub/Vendor Name</label><input id="f_vendor_name" value="${esc(d.vendor_name)}"></div>
+    <div class="field"><label>Estimate Amount</label><input type="number" step="0.01" id="f_estimate_amount" value="${d.estimate_amount ?? ''}"></div>
+    <div class="field-row">
+      <div class="field"><label><input type="checkbox" id="f_conditional_final_received" ${d.conditional_final_received?'checked':''}> Conditional Final (CF) Received</label></div>
+      <div class="field"><label><input type="checkbox" id="f_unconditional_final_received" ${d.unconditional_final_received?'checked':''}> Unconditional Final (UF) Received</label></div>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="f_notes" rows="2">${esc(d.notes)}</textarea></div>
+    ${modalActions('prelim', d)}
+  `;
+}
+
+function modalActions(type, d) {
+  return `
+    <div class="modal-actions">
+      ${d.id ? `<button class="btn danger" id="deleteBtn">Delete</button>` : ''}
+      <button class="btn secondary" id="cancelBtn">Cancel</button>
+      <button class="btn" id="saveBtn">Save</button>
+    </div>
+  `;
+}
+
+const TABLE_FOR = {
+  subcontractor: 'subcontractors', project: 'projects', subcontract: 'subcontracts',
+  changeOrder: 'subcontract_change_orders', invoice: 'subcontract_invoices',
+  payment: 'subcontract_payments', prelim: 'prelim_notices',
+};
+const FIELDS_FOR = {
+  subcontractor: ['name','contact_name','contact_title','office_phone','mobile_phone','fax','email','address_line1','address_line2','city','state','zip','cslb_number','license_class','trade','cslb_expiration','w9_on_file','dir_registration_number','dir_registration_expiration','ein','gl_policy_number','gl_provider','gl_expiration','wc_policy_number','wc_provider','wc_expiration','auto_policy_number','auto_provider','auto_expiration','is_active','notes'],
+  project: ['project_number','project_name','client_id','joc_number','project_manager_id','project_address','project_city','project_state','project_zip','hcai_oshpd_number','start_date','end_date','notes'],
+  subcontract: ['project_id','subcontractor_id','description','subcontract_amount','status','start_date','end_date','contract_sent_date','contract_executed_date','notes'],
+  changeOrder: ['subcontract_id','co_number','co_date','amount','description'],
+  invoice: ['subcontract_id','invoice_number','invoice_date','amount','paid_to','invoice_type','conditional_progress_waiver','unconditional_progress_waiver','conditional_final_waiver','unconditional_final_waiver','notes'],
+  payment: ['subcontract_invoice_id','payment_date','amount','check_number','payment_type','notes'],
+  prelim: ['subcontract_id','vendor_name','estimate_amount','conditional_final_received','unconditional_final_received','notes'],
+};
+const BOOL_FIELDS = new Set(['w9_on_file','is_active','conditional_progress_waiver','unconditional_progress_waiver','conditional_final_waiver','unconditional_final_waiver','conditional_final_received','unconditional_final_received']);
+const NUMBER_FIELDS = new Set(['subcontract_amount','amount','estimate_amount','co_number']);
+
+function readForm(type, existing) {
+  const out = { ...existing };
+  for (const f of FIELDS_FOR[type]) {
+    if (f === 'client_id' && document.getElementById('f_new_client_name')) {
+      // handled separately in save for project (may create a new client)
+      continue;
+    }
+    const el = document.getElementById(`f_${f}`);
+    if (!el) continue;
+    if (el.type === 'checkbox') { out[f] = el.checked; continue; }
+    let v = el.value;
+    if (v === '') { out[f] = null; continue; }
+    if (BOOL_FIELDS.has(f)) { out[f] = v === 'true'; continue; }
+    if (NUMBER_FIELDS.has(f)) { out[f] = Number(v); continue; }
+    out[f] = v;
+  }
+  return out;
+}
+
+function attachModalHandlers() {
+  const backdrop = document.getElementById('modalBackdrop');
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+  document.getElementById('cancelBtn').onclick = closeModal;
+  const delBtn = document.getElementById('deleteBtn');
+  if (delBtn) delBtn.onclick = async () => {
+    if (!confirm('Delete this record? This cannot be undone.')) return;
+    try { await deleteRow(TABLE_FOR[modal.type], modal.data.id); closeModal(); await loadAll(); }
+    catch (e) { alert(e.message); }
+  };
+  document.getElementById('saveBtn').onclick = async () => {
+    const type = modal.type;
+    try {
+      if (type === 'project') {
+        const newClientName = document.getElementById('f_new_client_name').value.trim();
+        let clientId = document.getElementById('f_client_id').value || null;
+        if (newClientName) {
+          const created = await insertRow('clients', { name: newClientName });
+          clientId = created[0].id;
+        }
+        const payload = readForm(type, modal.data);
+        payload.client_id = clientId;
+        await saveRecord(type, payload);
+      } else {
+        const payload = readForm(type, modal.data);
+        await saveRecord(type, payload);
+      }
+      closeModal();
+      await loadAll();
+    } catch (e) {
+      alert('Save failed: ' + e.message);
+    }
+  };
+}
+async function saveRecord(type, payload) {
+  const table = TABLE_FOR[type];
+  const { id, ...rest } = payload;
+  if (id) await updateRow(table, id, rest);
+  else await insertRow(table, rest);
+}
+
+// ---------- Boot ----------
+render();
+</script>
+</body>
+</html>
